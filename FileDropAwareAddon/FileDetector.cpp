@@ -105,18 +105,74 @@ bool FileDetector::HasValidSelection(IDispatch* pDispWindow) {
 	return false;
 }
 
+/**===============================================================================================================================================================
+Windows 资源管理器（Explorer）的窗口层级结构通常如下：
+
+|-CabinetWClass(主窗口 / 标题栏)
+|
+|---WorkerW / ReBarWindow32(包含地址栏、工具栏)
+|
+|---ShellTabWindowClass
+|	|
+|	|---SHELLDLL_DefView < --我们的目标区域
+|		|
+|	    |---DirectUIHWND(实际显示文件的控件)
+|	
+|---SysTreeView32(左侧导航栏，通常不包含在 DefView 中)
+
+	逻辑流程对比：
+	1. 拖动文件时：鼠标点在 DirectUIHWND 上 -> 向上找父级 -> 遇到 SHELLDLL_DefView -> IsContentArea 返回 true -> 继续检测选中项 -> 通过。
+
+	2. 拖动窗口时：鼠标点在 CabinetWClass 的标题栏区域 -> 向上找父级 -> 立即遇到 CabinetWClass (没遇到 SHELLDLL_DefView) -> IsContentArea 返回 false -> 拦截。
+
+	3. 点击左侧导航栏时：鼠标点在 SysTreeView32 -> 向上找父级 -> 遇到 CabinetWClass -> IsContentArea 返回 false -> 拦截（这也是合理的，因为通常左侧树的选中状态和右侧视图的选中状态是分离的）。
+======================================================================================================================================================================*/
+bool FileDetector::IsContentArea(HWND hWnd) {
+	HWND current = hWnd;
+	while (current != NULL) {
+		wchar_t className[256];
+		GetClassNameW(current, className, 256);
+
+		// 1. 如果遇到了文件视图核心窗口类，说明是在文件区域
+		// SHELLDLL_DefView: 包含 DirectUIHWND 或 SysListView32 的容器
+		if (wcscmp(className, L"SHELLDLL_DefView") == 0) {
+			return true;
+		}
+
+		// 2. 如果还没遇到 DefView 就已经到了顶层资源管理器窗口，
+		// 说明鼠标点在了标题栏、菜单栏、状态栏或左侧导航树上
+		if (wcscmp(className, L"CabinetWClass") == 0) {
+			return false;
+		}
+
+		// 3. 特殊处理桌面
+		// 桌面本身就是一个大 DefView，但也可能由 Progman/WorkerW 承载
+		if (wcscmp(className, L"Progman") == 0 || wcscmp(className, L"WorkerW") == 0) {
+			return true;
+		}
+
+		current = GetParent(current);
+	}
+	return false;
+}
+
 HWND FileDetector::FindShellParent(HWND hWnd, bool& isDesktop) {
 	isDesktop = false;
 	HWND current = hWnd;
 	// SHELLDLL_DefView: 桌面图标的实际窗口的父容器, 或者文件资源管理器窗口（CabinetWClass 或 ExplorerWClass）内部，
 	// 显示文件和文件夹列表的区域也是一个 SHELLDLL_DefView 类的窗口实例
 	// CabinetWClass: 是由 Windows Shell 进程（explorer.exe）创建的标准文件或文件夹窗口的标识符。
-	wchar_t firstClassName[256];
+	/*wchar_t firstClassName[256];
 	GetClassNameW(current, firstClassName, 256);
-	if (wcscmp(firstClassName, L"CabinetWClass") == 0)
+	LogInfo(L"first window class name: " + std::wstring(firstClassName));
+	if (
+		wcscmp(firstClassName, L"CabinetWClass") == 0 ||
+		wcscmp(firstClassName, L"TITLE_BAR_SCAFFOLDING_WINDOW_CLASS") == 0 ||
+        wcscmp(firstClassName, L"Microsoft.UI.Content.DesktopChildSiteBridge") == 0
+	)
 	{
 		return NULL;
-	}
+	}*/
 
 	while (current != NULL)
 	{
@@ -182,6 +238,13 @@ bool FileDetector::IsDraggingSupportedFile() {
 		// 2. 获取鼠标下的窗口句柄
 		HWND targetHwnd = WindowFromPoint(mousePos);
 		if (targetHwnd == NULL) throw 0;
+
+		// ================== 新增检查 ==================
+		// 如果鼠标不在文件显示区域（例如在标题栏），直接返回 false
+		if (!IsContentArea(targetHwnd)) {
+			return false;
+		}
+		// =============================================
 
 		// 3. 向上回溯
 		bool isDesktop = false;
