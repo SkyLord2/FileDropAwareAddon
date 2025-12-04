@@ -108,7 +108,7 @@ bool FileDetector::HasValidSelection(IDispatch* pDispWindow) {
 /**===============================================================================================================================================================
 Windows 资源管理器（Explorer）的窗口层级结构通常如下：
 
-|-CabinetWClass(主窗口 / 标题栏)
+|CabinetWClass(主窗口 / 标题栏)
 |
 |---WorkerW / ReBarWindow32(包含地址栏、工具栏)
 |
