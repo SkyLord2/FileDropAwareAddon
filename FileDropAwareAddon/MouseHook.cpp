@@ -15,9 +15,6 @@ static int		g_minDragY			= 0;
 // 钩子句柄
 static HHOOK	g_mouseHook			= NULL;
 
-v8::Local<v8::Function> MouseHook::m_fileDropCallback = v8::Local<v8::Function>();
-v8::Isolate* MouseHook::m_Isolate = NULL;
-
 extern void LogInfo(const std::wstring& info);
 extern void LogError(const std::wstring& error);
 
@@ -56,14 +53,6 @@ void MouseHook::InitMouseHook(std::set<std::wstring> supportedExtensions) {
 			if (g_supportedFile)
 			{
 				LogInfo(L"[Detected] Dragging supported file detected!");
-				v8::Local<v8::Value> argv[1] = {
-					v8::String::NewFromUtf8(m_Isolate, std::to_string(WM_PERFORM_DRAG_CHECK).c_str()).ToLocalChecked(),
-				};
-
-				// 调用回调函数
-				m_fileDropCallback->Call(m_Isolate->GetCurrentContext(),
-					Null(m_Isolate),
-					1, argv).ToLocalChecked();
 			}
 		}
 		else if (msg.message == WM_PERFORM_DRAG_RELEASE)
@@ -72,14 +61,6 @@ void MouseHook::InitMouseHook(std::set<std::wstring> supportedExtensions) {
 			{
 				g_supportedFile = false;
 				LogInfo(L"[Detected] Dragging released.");
-				v8::Local<v8::Value> argv[1] = {
-						v8::String::NewFromUtf8(m_Isolate, std::to_string(WM_PERFORM_DRAG_RELEASE).c_str()).ToLocalChecked(),
-				};
-
-				// 调用回调函数
-				m_fileDropCallback->Call(m_Isolate->GetCurrentContext(),
-					Null(m_Isolate),
-					1, argv).ToLocalChecked();
 			}
 		}
 		else
@@ -95,14 +76,6 @@ void MouseHook::InitMouseHook(std::set<std::wstring> supportedExtensions) {
 void MouseHook::UninitMouseHook() {
 	UnhookWindowsHookEx(g_mouseHook);
 	FileDetector::ComUninitialize();
-}
-
-void MouseHook::SetFileDropCallback(v8::Local<v8::Function> callback) {
-	m_fileDropCallback = callback;
-}
-
-void MouseHook::SetIsolate(v8::Isolate* isolate) {
-    m_Isolate = isolate;
 }
 
 LRESULT CALLBACK MouseHook::MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
