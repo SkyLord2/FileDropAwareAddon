@@ -2,8 +2,56 @@
 #include <iostream>
 #include <algorithm>
 #include <shlobj.h>
+#include <UIAutomation.h>
 
 #include "Utils.h"
+
+// UIA 自动化对象的全局实例
+static CComPtr<IUIAutomation> g_pAutomation = NULL;
+
+/**
+ * @brief 获取给定 UIA 元素的父元素。
+ * * @param pElement 当前 UIA 元素。
+ * @param ppParentElement 用于接收父元素指针的输出参数。
+ * @return HRESULT 成功返回 S_OK，否则返回错误码。
+ */
+HRESULT GetParentElement(IUIAutomationElement* pElement, IUIAutomationElement** ppParentElement) {
+	if (pElement == NULL || ppParentElement == NULL || g_pAutomation == NULL) {
+		return E_POINTER;
+	}
+
+	*ppParentElement = NULL;
+	CComPtr<IUIAutomationTreeWalker> pWalker = NULL;
+	HRESULT hr = S_OK;
+
+	// 1. 获取 TreeWalker 实例 (这里使用 RawViewWalker，因为它包含所有元素，包括容器)
+	// 您也可以考虑使用 ControlViewWalker (只包含控件) 或 ContentViewWalker (只包含内容)。
+	hr = g_pAutomation->get_RawViewWalker(&pWalker);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	// 2. 使用 GetParentElement 方法获取父元素
+	// TreeWalker 接口提供了直接的方法来导航树。
+	hr = pWalker->GetParentElement(pElement, ppParentElement);
+
+	if (hr == S_OK) {
+		// 成功获取父元素
+		return S_OK;
+	}
+	else if (hr == UIA_E_ELEMENTNOTAVAILABLE) {
+		// 元素不可用（例如，窗口已关闭）
+		return hr;
+	}
+	else if (hr == S_FALSE) {
+		// 已经到达树的根部 (通常是桌面)，没有父元素
+		return S_FALSE;
+	}
+	else {
+		// 其他错误
+		return hr;
+	}
+}
 
 extern void LogInfo(const std::wstring& info);
 extern void LogError(const std::wstring& error);
@@ -102,6 +150,97 @@ bool FileDetector::HasValidSelection(IDispatch* pDispWindow) {
 			}
 		}
 	}
+	return false;
+}
+
+bool FileDetector::IsMouseOverFileItemUIA(const POINT& mousePos) {
+	// 1. 初始化 UIA 自动化对象 (只需初始化一次)
+	if (g_pAutomation == NULL) {
+		// CLSID_CUIAutomation 对应 IUIAutomation 接口的自动化对象
+		HRESULT hr = CoCreateInstance(
+			CLSID_CUIAutomation,
+			NULL,
+			CLSCTX_INPROC_SERVER,
+			IID_IUIAutomation,
+			(void**)&g_pAutomation
+		);
+		if (FAILED(hr)) {
+			LogError(L"Failed to CoCreate IUIAutomation.");
+			return false;
+		}
+	}
+
+	CComPtr<IUIAutomationElement> pElement = NULL;
+
+	// 2. 获取鼠标坐标下的 UIA 元素
+	HRESULT hr = g_pAutomation->ElementFromPoint(mousePos, &pElement);
+	if (FAILED(hr) || pElement == NULL) {
+		// 如果失败，通常是鼠标在屏幕外或不可访问区域
+		LogError(L"Failed to get element from point.");
+		return false; // 视情况处理 S_FALSE
+	}
+	// 3. 获取元素的 ControlType 属性
+	CONTROLTYPEID controlTypeId;
+	hr = pElement->get_CurrentControlType(&controlTypeId);
+	if (FAILED(hr)) {
+		LogError(L"Failed to get ControlType.");
+		return false;
+	}
+	LogInfo(L"ControlType ID: " + std::to_wstring(controlTypeId));
+
+	CComPtr<IUIAutomationElement> pParentElement;
+	// 尝试获取父元素
+	hr = GetParentElement(pElement, &pParentElement);
+	if (FAILED(hr) || pParentElement == NULL) {
+		LogError(L"Failed to get parent element.");
+		return false;
+	}
+
+	// 成功获取父元素，现在可以检查 pParentElement 的 ControlType 或 Name 属性
+	CONTROLTYPEID parentControlType;
+	hr = pParentElement->get_CurrentControlType(&parentControlType);
+	if (FAILED(hr)) {
+		LogError(L"Failed to get parent ControlType.");
+		return false;
+	}
+	LogInfo(L"parent element type id: " + std::to_wstring(parentControlType));
+	// 例如：检查父元素是否是列表项容器
+	if (parentControlType == UIA_ListItemControlTypeId || controlTypeId == UIA_ListItemControlTypeId) {
+		return true;
+	}
+
+	/*
+	空白
+	UIA_ListControlTypeId 50008
+	UIA_PaneControlTypeId 50033
+
+	文件
+	UIA_EditControlTypeId 50004
+	UIA_ListItemControlTypeId 50007
+
+	时间标签
+	UIA_CustomControlTypeId 50025
+	UIA_GroupControlTypeId 50026
+
+	表头
+	UIA_SplitButtonControlTypeId 50031
+	UIA_HeaderControlTypeId 50034
+	*/
+
+	// 4. 过滤和分类
+	//if (controlTypeId == UIA_ListItemControlTypeId) {
+	//	// 命中了文件或文件夹项
+	//	*pResult = HitType_FileItem;
+	//}
+	//else if (controlTypeId == UIA_GroupControlTypeId || controlTypeId == UIA_HeaderControlTypeId) {
+	//	// 命中了分组标题 (如 "今天")
+	//	*pResult = HitType_GroupHeader;
+	//}
+	//else {
+	//	// 命中了滚动条、容器或其他元素
+	//	*pResult = HitType_Other;
+	//}
+
 	return false;
 }
 
@@ -280,6 +419,15 @@ bool FileDetector::IsDraggingSupportedFile() {
 		HWND shellHwnd = FindShellParent(targetHwnd, isDesktop);
 		if (shellHwnd == NULL) throw 0;
 
+		// ================== 新增 UIA 检查 ==================
+		if (!isDesktop)
+		{
+			bool onFile = IsMouseOverFileItemUIA(mousePos);
+			if (!onFile)
+			{
+				return false;
+			}
+		}
 		// ================== 新增检查 ==================
 		// 如果鼠标不在文件显示区域（例如在标题栏），直接返回 false
 		if (!IsContentArea(targetHwnd, mousePos, isDesktop)) {

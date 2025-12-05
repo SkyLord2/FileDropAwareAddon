@@ -22,6 +22,7 @@ public:
 private:
     static bool IsTargetExtension(const std::wstring& path);
     static bool HasValidSelection(IDispatch* pDispWindow);
+    static bool IsMouseOverFileItemUIA(const POINT& mousePos);
     static bool IsContentArea(HWND hWnd, const POINT& mousePos, bool isDesktop);
     static HWND FindShellParent(HWND hWnd, bool& isDesktop);
 };
