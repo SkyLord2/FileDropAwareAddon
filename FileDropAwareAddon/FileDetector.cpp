@@ -133,6 +133,20 @@ bool FileDetector::IsContentArea(HWND hWnd) {
 		wchar_t className[256];
 		GetClassNameW(current, className, 256);
 
+		//==========================WIN10===============================
+		// 1. 搜索框
+		if (wcscmp(className, L"SearchEditBoxWrapperClass") == 0) {
+			return false;
+		}
+		// 2. 地址栏
+		if (wcscmp(className, L"Address Band Root") == 0) {
+			return false;
+		}
+		// 3. TravelBand
+		if (wcscmp(className, L"TravelBand") == 0) {
+			return false;
+		}
+
 		// 1. 如果遇到了文件视图核心窗口类，说明是在文件区域
 		// SHELLDLL_DefView: 包含 DirectUIHWND 或 SysListView32 的容器
 		if (wcscmp(className, L"SHELLDLL_DefView") == 0) {

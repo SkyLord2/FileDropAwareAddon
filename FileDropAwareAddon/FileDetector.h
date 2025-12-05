@@ -15,8 +15,8 @@ public:
     FileDetector();
     ~FileDetector();
 public:
-	static bool ComInitialize();
-	static void ComUninitialize();
+    static bool ComInitialize();
+    static void ComUninitialize();
     static void SetExtensions(const std::set<std::wstring>& extensions);
     static bool IsDraggingSupportedFile();
 private:
