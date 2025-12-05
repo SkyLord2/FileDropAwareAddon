@@ -127,8 +127,11 @@ Windows 资源管理器（Explorer）的窗口层级结构通常如下：
 
 	3. 点击左侧导航栏时：鼠标点在 SysTreeView32 -> 向上找父级 -> 遇到 CabinetWClass -> IsContentArea 返回 false -> 拦截（这也是合理的，因为通常左侧树的选中状态和右侧视图的选中状态是分离的）。
 ======================================================================================================================================================================*/
-bool FileDetector::IsContentArea(HWND hWnd) {
+bool FileDetector::IsContentArea(HWND hWnd, const POINT& mousePos, bool isDesktop) {
 	HWND current = hWnd;
+	RECT contentRect;
+	std::wstring preClassName;
+
 	while (current != NULL) {
 		wchar_t className[256];
 		GetClassNameW(current, className, 256);
@@ -150,6 +153,23 @@ bool FileDetector::IsContentArea(HWND hWnd) {
 		// 1. 如果遇到了文件视图核心窗口类，说明是在文件区域
 		// SHELLDLL_DefView: 包含 DirectUIHWND 或 SysListView32 的容器
 		if (wcscmp(className, L"SHELLDLL_DefView") == 0) {
+			LogInfo(L"class name: " + std::wstring(className) + L", previous class name: " + preClassName);
+			if (!isDesktop)
+			{
+				// 获取 SHELLDLL_DefView 容器的屏幕坐标边界
+				if (GetWindowRect(current, &contentRect)) {
+
+					// 空间判断：检查鼠标 Y 坐标是否在顶部 HEADING_HEIGHT 范围内
+					if (mousePos.y <= contentRect.top + 30) {
+						// 鼠标在顶部表头区域，返回 false
+						LogInfo(L"Mouse is in the top header area of SHELLDLL_DefView (Y-coordinate check).");
+						return false;
+					}
+
+					// Y 坐标通过了表头检查，则认为是有效的文件列表区域
+					return true;
+				}
+			}
 			return true;
 		}
 
@@ -166,6 +186,8 @@ bool FileDetector::IsContentArea(HWND hWnd) {
 		}
 
 		current = GetParent(current);
+
+		preClassName = className;
 	}
 	return false;
 }
@@ -253,17 +275,17 @@ bool FileDetector::IsDraggingSupportedFile() {
 		HWND targetHwnd = WindowFromPoint(mousePos);
 		if (targetHwnd == NULL) throw 0;
 
-		// ================== 新增检查 ==================
-		// 如果鼠标不在文件显示区域（例如在标题栏），直接返回 false
-		if (!IsContentArea(targetHwnd)) {
-			return false;
-		}
-		// =============================================
-
 		// 3. 向上回溯
 		bool isDesktop = false;
 		HWND shellHwnd = FindShellParent(targetHwnd, isDesktop);
 		if (shellHwnd == NULL) throw 0;
+
+		// ================== 新增检查 ==================
+		// 如果鼠标不在文件显示区域（例如在标题栏），直接返回 false
+		if (!IsContentArea(targetHwnd, mousePos, isDesktop)) {
+			return false;
+		}
+		// =============================================
 
 		// 4. 初始化 ShellWindows
 		CComPtr<IShellWindows> pShellWindows;
