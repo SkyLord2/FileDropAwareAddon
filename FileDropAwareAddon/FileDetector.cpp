@@ -268,8 +268,8 @@ Windows 资源管理器（Explorer）的窗口层级结构通常如下：
 ======================================================================================================================================================================*/
 bool FileDetector::IsContentArea(HWND hWnd, const POINT& mousePos, bool isDesktop) {
 	HWND current = hWnd;
-	RECT contentRect;
-	std::wstring preClassName;
+	//RECT contentRect;
+	//std::wstring preClassName;
 
 	while (current != NULL) {
 		wchar_t className[256];
@@ -292,23 +292,23 @@ bool FileDetector::IsContentArea(HWND hWnd, const POINT& mousePos, bool isDeskto
 		// 1. 如果遇到了文件视图核心窗口类，说明是在文件区域
 		// SHELLDLL_DefView: 包含 DirectUIHWND 或 SysListView32 的容器
 		if (wcscmp(className, L"SHELLDLL_DefView") == 0) {
-			LogInfo(L"class name: " + std::wstring(className) + L", previous class name: " + preClassName);
-			if (!isDesktop)
-			{
-				// 获取 SHELLDLL_DefView 容器的屏幕坐标边界
-				if (GetWindowRect(current, &contentRect)) {
+			//LogInfo(L"class name: " + std::wstring(className) + L", previous class name: " + preClassName);
+			//if (!isDesktop)
+			//{
+			//	// 获取 SHELLDLL_DefView 容器的屏幕坐标边界
+			//	if (GetWindowRect(current, &contentRect)) {
 
-					// 空间判断：检查鼠标 Y 坐标是否在顶部 HEADING_HEIGHT 范围内
-					if (mousePos.y <= contentRect.top + 30) {
-						// 鼠标在顶部表头区域，返回 false
-						LogInfo(L"Mouse is in the top header area of SHELLDLL_DefView (Y-coordinate check).");
-						return false;
-					}
+			//		// 空间判断：检查鼠标 Y 坐标是否在顶部 HEADING_HEIGHT 范围内
+			//		if (mousePos.y <= contentRect.top + 30) {
+			//			// 鼠标在顶部表头区域，返回 false
+			//			LogInfo(L"Mouse is in the top header area of SHELLDLL_DefView (Y-coordinate check).");
+			//			return false;
+			//		}
 
-					// Y 坐标通过了表头检查，则认为是有效的文件列表区域
-					return true;
-				}
-			}
+			//		// Y 坐标通过了表头检查，则认为是有效的文件列表区域
+			//		return true;
+			//	}
+			//}
 			return true;
 		}
 
@@ -326,7 +326,7 @@ bool FileDetector::IsContentArea(HWND hWnd, const POINT& mousePos, bool isDeskto
 
 		current = GetParent(current);
 
-		preClassName = className;
+		//preClassName = className;
 	}
 	return false;
 }
