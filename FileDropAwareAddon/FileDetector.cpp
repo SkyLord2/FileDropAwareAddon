@@ -7,7 +7,7 @@
 #include "Utils.h"
 
 // UIA 自动化对象的全局实例
-static CComPtr<IUIAutomation> g_pAutomation = NULL;
+// static CComPtr<IUIAutomation> g_pAutomation = NULL;
 
 /**
  * @brief 获取给定 UIA 元素的父元素。
@@ -15,8 +15,8 @@ static CComPtr<IUIAutomation> g_pAutomation = NULL;
  * @param ppParentElement 用于接收父元素指针的输出参数。
  * @return HRESULT 成功返回 S_OK，否则返回错误码。
  */
-HRESULT GetParentElement(IUIAutomationElement* pElement, IUIAutomationElement** ppParentElement) {
-	if (pElement == NULL || ppParentElement == NULL || g_pAutomation == NULL) {
+HRESULT GetParentElement(IUIAutomationElement* pElement, CComPtr<IUIAutomation> pAutomation, IUIAutomationElement** ppParentElement) {
+	if (pElement == NULL || ppParentElement == NULL || pAutomation == NULL) {
 		return E_POINTER;
 	}
 
@@ -26,7 +26,7 @@ HRESULT GetParentElement(IUIAutomationElement* pElement, IUIAutomationElement** 
 
 	// 1. 获取 TreeWalker 实例 (这里使用 RawViewWalker，因为它包含所有元素，包括容器)
 	// 您也可以考虑使用 ControlViewWalker (只包含控件) 或 ContentViewWalker (只包含内容)。
-	hr = g_pAutomation->get_RawViewWalker(&pWalker);
+	hr = pAutomation->get_RawViewWalker(&pWalker);
 	if (FAILED(hr)) {
 		return hr;
 	}
@@ -154,31 +154,32 @@ bool FileDetector::HasValidSelection(IDispatch* pDispWindow) {
 }
 
 bool FileDetector::IsMouseOverFileItemUIA(const POINT& mousePos) {
+	CComPtr<IUIAutomation> pAutomation = NULL;
 	// 1. 初始化 UIA 自动化对象 (只需初始化一次)
-	if (g_pAutomation == NULL) {
-		// CLSID_CUIAutomation 对应 IUIAutomation 接口的自动化对象
-		HRESULT hr = CoCreateInstance(
-			CLSID_CUIAutomation,
-			NULL,
-			CLSCTX_INPROC_SERVER,
-			IID_IUIAutomation,
-			(void**)&g_pAutomation
-		);
-		if (FAILED(hr)) {
-			LogError(L"Failed to CoCreate IUIAutomation.");
-			return false;
-		}
+	// CLSID_CUIAutomation 对应 IUIAutomation 接口的自动化对象
+	HRESULT hr = CoCreateInstance(
+		CLSID_CUIAutomation,
+		NULL,
+		CLSCTX_INPROC_SERVER,
+		IID_IUIAutomation,
+		(void**)&pAutomation
+	);
+	if (FAILED(hr)) {
+		LogError(L"Failed to CoCreate IUIAutomation.");
+		return false;
 	}
-
+	
 	CComPtr<IUIAutomationElement> pElement = NULL;
-
+	
 	// 2. 获取鼠标坐标下的 UIA 元素
-	HRESULT hr = g_pAutomation->ElementFromPoint(mousePos, &pElement);
+	hr = pAutomation->ElementFromPoint(mousePos, &pElement);
+	
 	if (FAILED(hr) || pElement == NULL) {
 		// 如果失败，通常是鼠标在屏幕外或不可访问区域
 		LogError(L"Failed to get element from point.");
 		return false; // 视情况处理 S_FALSE
 	}
+	
 	// 3. 获取元素的 ControlType 属性
 	CONTROLTYPEID controlTypeId;
 	hr = pElement->get_CurrentControlType(&controlTypeId);
@@ -190,7 +191,7 @@ bool FileDetector::IsMouseOverFileItemUIA(const POINT& mousePos) {
 
 	CComPtr<IUIAutomationElement> pParentElement;
 	// 尝试获取父元素
-	hr = GetParentElement(pElement, &pParentElement);
+	hr = GetParentElement(pElement, pAutomation, &pParentElement);
 	if (FAILED(hr) || pParentElement == NULL) {
 		LogError(L"Failed to get parent element.");
 		return false;
@@ -292,7 +293,7 @@ bool FileDetector::IsContentArea(HWND hWnd, const POINT& mousePos, bool isDeskto
 		// 1. 如果遇到了文件视图核心窗口类，说明是在文件区域
 		// SHELLDLL_DefView: 包含 DirectUIHWND 或 SysListView32 的容器
 		if (wcscmp(className, L"SHELLDLL_DefView") == 0) {
-			//LogInfo(L"class name: " + std::wstring(className) + L", previous class name: " + preClassName);
+			// LogInfo(L"class name: " + std::wstring(className) + L", previous class name: " + preClassName);
 			//if (!isDesktop)
 			//{
 			//	// 获取 SHELLDLL_DefView 容器的屏幕坐标边界
@@ -353,7 +354,7 @@ HWND FileDetector::FindShellParent(HWND hWnd, bool& isDesktop) {
 	{
 		wchar_t className[256];
 		GetClassNameW(current, className, 256);
-		LogInfo(L"Drag window class name: " + std::wstring(className));
+		//LogInfo(L"Drag window class name: " + std::wstring(className));
 		// 检查是否是普通资源管理器
 		if (wcscmp(className, L"CabinetWClass") == 0)
 		{
@@ -412,13 +413,13 @@ bool FileDetector::IsDraggingSupportedFile() {
 
 		// 2. 获取鼠标下的窗口句柄
 		HWND targetHwnd = WindowFromPoint(mousePos);
-		if (targetHwnd == NULL) throw 0;
+		if (targetHwnd == NULL) return false;
 
 		// 3. 向上回溯
 		bool isDesktop = false;
 		HWND shellHwnd = FindShellParent(targetHwnd, isDesktop);
-		if (shellHwnd == NULL) throw 0;
-
+		if (shellHwnd == NULL) return false;
+		
 		// ================== 新增 UIA 检查 ==================
 		if (!isDesktop)
 		{
@@ -428,22 +429,23 @@ bool FileDetector::IsDraggingSupportedFile() {
 				return false;
 			}
 		}
+		
 		// ================== 新增检查 ==================
 		// 如果鼠标不在文件显示区域（例如在标题栏），直接返回 false
 		if (!IsContentArea(targetHwnd, mousePos, isDesktop)) {
 			return false;
 		}
 		// =============================================
-
+		
 		// 4. 初始化 ShellWindows
 		CComPtr<IShellWindows> pShellWindows;
 		HRESULT hr = pShellWindows.CoCreateInstance(CLSID_ShellWindows);
 		if (FAILED(hr))
 		{
 			LogError(L"Failed to create IShellWindows instance: " + HResultToHexString(hr));
-			throw 0;
+			return false;
 		}
-
+		
 		// 5. 根据类型查找
 		if (isDesktop)
 		{

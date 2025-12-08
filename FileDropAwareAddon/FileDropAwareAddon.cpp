@@ -5,32 +5,87 @@
 #include <string>
 #include <cstring>
 #include <iostream>
+#include <queue>
+#include <mutex>
 #include "MouseHook.h"
 #include "Utils.h"
 
 v8::Isolate* isolate = NULL;
 
-v8::Local<v8::Function> logCallback;
+static v8::Persistent<v8::Function> logCallback;
 
-static void LogFunc(const std::wstring& info) {
-	std::wcout << info << std::endl;
-	std::string logStr = WcharToUtf8(info.c_str());
-	v8::Local<v8::Value> argv[1] = {
-		v8::String::NewFromUtf8(isolate, logStr.c_str()).ToLocalChecked()
-	};
-	if (logCallback->IsNull() || logCallback->IsUndefined())
-	{
-		std::wcerr << L"logCallback is null" << std::endl;
-		return;
-	}
+static uv_async_t async_log_handle;
+// 存储日志信息 (需要线程安全)
+struct LogMessage {
+	std::wstring message;
+	// 可能还需要一个类型指示器 (Info/Error)
+};
+
+std::mutex log_mutex;
+std::queue<LogMessage> log_queue;
+
+static void LogBase(const std::wstring& info) {
 	if (isolate == NULL)
 	{
 		std::wcerr << L"isolate is null" << std::endl;
 		return;
 	}
-	logCallback->Call(isolate->GetCurrentContext(),
+	// 声明 HandleScope，确保局部 V8 对象的安全创建
+	v8::HandleScope handle_scope(isolate);
+
+	std::string logStr = WcharToUtf8(info.c_str());
+	// 从 Persistent 句柄获取 Local 句柄用于本次调用
+	if (logCallback.IsEmpty())
+	{
+		std::wcerr << L"logCallback is null" << std::endl;
+		return;
+	}
+	v8::Local<v8::Function> localCallback = v8::Local<v8::Function>::New(isolate, logCallback);
+	v8::Local<v8::Value> argv[1] = {
+		v8::String::NewFromUtf8(isolate, logStr.c_str()).ToLocalChecked()
+	};
+	if (localCallback->IsNull() || localCallback->IsUndefined()) {
+		std::wcerr << L"localCallback is null" << std::endl;
+		return;
+	}
+	localCallback->Call(isolate->GetCurrentContext(),
 		Null(isolate),
 		1, argv).ToLocalChecked();
+}
+
+// 异步回调：在 Node.js 主线程上执行
+static void AsyncLogCallback(uv_async_t* handle) {
+	// 必须在这里创建 HandleScope 
+	v8::HandleScope handle_scope(isolate);
+
+	// 从队列中取出所有等待的日志消息
+	std::lock_guard<std::mutex> lock(log_mutex);
+
+	while (!log_queue.empty()) {
+		LogMessage msg = log_queue.front();
+		log_queue.pop();
+
+		// 调用原始的 LogFunc (现在它在主线程上是安全的)
+		// 注意：LogFunc 内部需要被修改，不再需要锁和 HandleScope，因为它现在是被主线程调用的。
+		// 为了避免修改 LogFunc，我们在这里直接调用其逻辑：
+		//std::string logStr = WcharToUtf8(msg.message.c_str());
+
+		// ... (V8 调用逻辑，使用 logCallback 和 isolate) ...
+		LogBase(msg.message);
+	}
+}
+
+static void LogFunc(const std::wstring& info) {
+	std::wcout << info << std::endl;
+	// 1. 将日志信息放入线程安全队列
+	{
+		std::lock_guard<std::mutex> lock(log_mutex);
+		log_queue.push({ info });
+	}
+
+	// 2. 触发 Libuv 事件，通知主线程执行 AsyncLogCallback
+	// 这是安全的，因为它只发送一个信号，不涉及 V8 对象。
+	uv_async_send(&async_log_handle);
 }
 
 void LogError(const std::wstring& error) {
@@ -76,6 +131,8 @@ static void AwareInitialize(const v8::FunctionCallbackInfo<v8::Value>& args) {
 		return;
 	}
 
+	uv_async_init(uv_default_loop(), &async_log_handle, AsyncLogCallback);
+
 	node::Environment* env = node::GetCurrentEnvironment(isolate->GetCurrentContext());
 	if (env)
 	{
@@ -83,14 +140,19 @@ static void AwareInitialize(const v8::FunctionCallbackInfo<v8::Value>& args) {
 	}
 	else {
 		std::wcerr << L"env is null" << std::endl;
-		LogError(L"env is null");
+		// LogError(L"env is null");
 	}
-	
+
+	MouseHook::SetIsolate(isolate);
 	v8::Local<v8::Function> callBack = v8::Local<v8::Function>::Cast(args[1]);
 	MouseHook::SetFileDropCallback(callBack);
-	MouseHook::SetIsolate(isolate);
-
-    logCallback = v8::Local<v8::Function>::Cast(args[2]);
+	
+	// ❗ 关键修正：存储 Persistent 句柄
+	v8::Local<v8::Function> logFunc = v8::Local<v8::Function>::Cast(args[2]);
+	if (!logCallback.IsEmpty()) {
+		logCallback.Reset(); // 释放旧的引用
+	}
+	logCallback.Reset(isolate, logFunc); // 存储新的 Persistent 引用
 
 	v8::Local<v8::Array> jsArray = v8::Local<v8::Array>::Cast(args[0]);
 	uint32_t arrayLength = jsArray->Length();

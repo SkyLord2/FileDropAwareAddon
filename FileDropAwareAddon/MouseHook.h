@@ -6,11 +6,12 @@
 
 #define WM_PERFORM_DRAG_CHECK	(WM_USER + 100)
 #define WM_PERFORM_DRAG_RELEASE (WM_USER + 101)
+#define WM_DRAG_CHECK_SUCCESS   (WM_USER + 102)
 
 class MouseHook
 {
 public:
-	static v8::Local<v8::Function> m_fileDropCallback;
+	static v8::Persistent<v8::Function> m_fileDropCallback;
 	static v8::Isolate* m_Isolate;
 public:
 	static void InitMouseHook(std::set<std::wstring> supportedExtensions);
