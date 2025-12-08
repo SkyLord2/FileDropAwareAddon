@@ -10,27 +10,36 @@
 
 v8::Isolate* isolate = NULL;
 
-v8::Local<v8::Function> logCallback;
+static v8::Persistent<v8::Function> logCallback;
 
 static void LogFunc(const std::wstring& info) {
 	std::wcout << info << std::endl;
-	std::string logStr = WcharToUtf8(info.c_str());
-	v8::Local<v8::Value> argv[1] = {
-		v8::String::NewFromUtf8(isolate, logStr.c_str()).ToLocalChecked()
-	};
-	if (logCallback->IsNull() || logCallback->IsUndefined())
-	{
-		std::wcerr << L"logCallback is null" << std::endl;
-		return;
-	}
-	if (isolate == NULL)
-	{
-		std::wcerr << L"isolate is null" << std::endl;
-		return;
-	}
-	logCallback->Call(isolate->GetCurrentContext(),
-		Null(isolate),
-		1, argv).ToLocalChecked();
+	// if (isolate == NULL)
+	// {
+	// 	std::wcerr << L"isolate is null" << std::endl;
+	// 	return;
+	// }
+	// // 声明 HandleScope，确保局部 V8 对象的安全创建
+	// v8::HandleScope handle_scope(isolate);
+
+	// std::string logStr = WcharToUtf8(info.c_str());
+	// // 从 Persistent 句柄获取 Local 句柄用于本次调用
+	// if (logCallback.IsEmpty())
+	// {
+	// 	std::wcerr << L"logCallback is null" << std::endl;
+	// 	return;
+	// }
+	// v8::Local<v8::Function> localCallback = v8::Local<v8::Function>::New(isolate, logCallback);
+	// v8::Local<v8::Value> argv[1] = {
+	// 	v8::String::NewFromUtf8(isolate, logStr.c_str()).ToLocalChecked()
+	// };
+	// if (localCallback->IsNull() || localCallback->IsUndefined()) {
+	// 	std::wcerr << L"localCallback is null" << std::endl;
+	// 	return;
+	// }
+	// localCallback->Call(isolate->GetCurrentContext(),
+	// 	Null(isolate),
+	// 	1, argv).ToLocalChecked();
 }
 
 void LogError(const std::wstring& error) {
@@ -75,7 +84,6 @@ static void AwareInitialize(const v8::FunctionCallbackInfo<v8::Value>& args) {
 			v8::String::NewFromUtf8(isolate, "第三个参数必须是回调函数").ToLocalChecked()));
 		return;
 	}
-
 	node::Environment* env = node::GetCurrentEnvironment(isolate->GetCurrentContext());
 	if (env)
 	{
@@ -83,14 +91,19 @@ static void AwareInitialize(const v8::FunctionCallbackInfo<v8::Value>& args) {
 	}
 	else {
 		std::wcerr << L"env is null" << std::endl;
-		LogError(L"env is null");
+		// LogError(L"env is null");
 	}
-	
+
+	MouseHook::SetIsolate(isolate);
 	v8::Local<v8::Function> callBack = v8::Local<v8::Function>::Cast(args[1]);
 	MouseHook::SetFileDropCallback(callBack);
-	MouseHook::SetIsolate(isolate);
-
-    logCallback = v8::Local<v8::Function>::Cast(args[2]);
+	
+	// ❗ 关键修正：存储 Persistent 句柄
+	v8::Local<v8::Function> logFunc = v8::Local<v8::Function>::Cast(args[2]);
+	if (!logCallback.IsEmpty()) {
+		logCallback.Reset(); // 释放旧的引用
+	}
+	logCallback.Reset(isolate, logFunc); // 存储新的 Persistent 引用
 
 	v8::Local<v8::Array> jsArray = v8::Local<v8::Array>::Cast(args[0]);
 	uint32_t arrayLength = jsArray->Length();
